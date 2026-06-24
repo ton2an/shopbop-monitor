@@ -1,12 +1,13 @@
 # Copy to brands.txt and edit. Whole-brand watches — alert on ANY new product
 # or restock from the brand. One brand per line, as Shopbop spells it
-# (case-insensitive, accents OK). Optional "| MENS" (default WOMENS).
+# (case-insensitive, accents OK).
 #
-# Only exact-designer matches are kept, so resellers (e.g. "Shopbop Archive",
-# "What Goes Around Comes Around") and diffusion lines (e.g. "MM6 Maison
-# Margiela") are excluded automatically. A brand that logs "0 products" is
-# misspelled, in the other department, or not carried by Shopbop.
+# No department = BOTH men's and women's, so co-ed/unisex items are never
+# missed (and a co-ed item alerts only once). Add "| MENS" or "| WOMENS" to
+# restrict a brand to one department.
+#
+# Only exact-designer matches are kept, so resellers (e.g. "Shopbop Archive")
+# and diffusion lines (e.g. "MM6 Maison Margiela") are excluded automatically.
 AGOLDE
 Reformation
-Ganni
 Our Legacy | MENS

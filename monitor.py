@@ -58,7 +58,7 @@ API          = "https://api.shopbop.com/public/search"
 SITE_URL     = "https://www.shopbop.com"
 IMG_BASE     = "https://m.media-amazon.com/images/G/01/Shopbop/p"
 SITE_ID      = "1006"          # Shopbop US
-DEFAULT_DEPT = "WOMENS"        # WOMENS | MENS
+DEPTS_ALL    = ("MENS", "WOMENS")   # searched by default (covers co-ed/unisex)
 PAGE_LIMIT   = 100             # products per API page
 MAX_PRODUCTS = 600             # safety cap per brand per run
 MAX_ALERTS   = 30              # cap pushes per run; extras are summarized
@@ -91,33 +91,36 @@ def _parse_line(line: str) -> list[str]:
     return [p.strip() for p in line.split("|")]
 
 
-def _dept(parts: list[str], idx: int) -> str:
+def _depts(parts: list[str], idx: int) -> tuple[str, ...]:
+    """Department(s) for a config line. Explicit MENS/WOMENS restricts to that;
+    omitted means BOTH (so co-ed/unisex items are never missed)."""
     if len(parts) > idx and parts[idx]:
         d = parts[idx].strip().upper()
         if d in ("WOMENS", "MENS"):
-            return d
-    return DEFAULT_DEPT
+            return (d,)
+    return DEPTS_ALL
 
 
-def load_brands() -> list[tuple[str, str]]:
-    """Returns [(brand, dept)]."""
+def load_brands() -> dict[str, tuple[str, ...]]:
+    """Returns {brand: (depts...)} — lines for the same brand are merged."""
     if not BRANDS_PATH.exists():
-        return []
-    out: list[tuple[str, str]] = []
+        return {}
+    acc: dict[str, set[str]] = {}
     for raw in BRANDS_PATH.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         parts = _parse_line(line)
-        out.append((parts[0], _dept(parts, 1)))
-    return out
+        acc.setdefault(parts[0], set()).update(_depts(parts, 1))
+    return {k: tuple(sorted(v)) for k, v in acc.items()}
 
 
-def load_items() -> list[tuple[str, str, str]]:
-    """Returns [(brand, query, dept)]."""
+def load_items() -> list[tuple[str, str, tuple[str, ...]]]:
+    """Returns [(brand, query, depts)] — same (brand, query) lines merged."""
     if not ITEMS_PATH.exists():
         return []
-    out: list[tuple[str, str, str]] = []
+    acc: dict[tuple[str, str], set[str]] = {}
+    order: list[tuple[str, str]] = []
     for raw in ITEMS_PATH.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -126,8 +129,11 @@ def load_items() -> list[tuple[str, str, str]]:
         if len(parts) < 2 or not parts[1]:
             log(f"items.txt: skipping malformed line (need 'Brand | words'): {line!r}")
             continue
-        out.append((parts[0], parts[1], _dept(parts, 2)))
-    return out
+        key = (parts[0], parts[1])
+        if key not in acc:
+            order.append(key)
+        acc.setdefault(key, set()).update(_depts(parts, 2))
+    return [(b, q, tuple(sorted(acc[(b, q)]))) for (b, q) in order]
 
 
 # --------------------------------------------------------------------------- #
@@ -359,51 +365,61 @@ def main() -> None:
         log("Nothing to watch: add brands to brands.txt and/or items to items.txt.")
         sys.exit(1)
 
-    # Fetch each distinct (brand, dept) once; reused by brand + item watches.
-    to_fetch: dict[tuple[str, str], None] = {}
-    for name, dept in brand_watches:
-        to_fetch[(name, dept)] = None
-    for brand, _q, dept in item_watches:
-        to_fetch[(brand, dept)] = None
+    # Fetch each distinct (brand, dept) once; reused across brand + item watches.
+    to_fetch: set[tuple[str, str]] = set()
+    for name, depts in brand_watches.items():
+        for d in depts:
+            to_fetch.add((name, d))
+    for brand, _q, depts in item_watches:
+        for d in depts:
+            to_fetch.add((brand, d))
 
-    log(f"Fetching {len(to_fetch)} brand(s) for "
+    log(f"Fetching {len(to_fetch)} brand×dept combo(s) for "
         f"{len(brand_watches)} brand-watch(es) + {len(item_watches)} item-watch(es)...")
     fetched: dict[tuple[str, str], dict] = {}
-    for (name, dept) in to_fetch:
+    for (name, dept) in sorted(to_fetch):
         prods = fetch_brand(name, dept)
         fetched[(name, dept)] = prods
         if not prods:
-            log(f"  {name} [{dept}]: 0 products — wrong dept, misspelled, or not on Shopbop?")
+            log(f"  {name} [{dept}]: 0 products — not carried in this dept (skipped)")
         else:
             log(f"  {name} [{dept}]: {len(prods)} products")
         time.sleep(REQUEST_GAP)
+
+    def merged_products(name: str, depts: tuple[str, ...]) -> dict:
+        """Union a brand's products across departments, deduped by productCode
+        (a co-ed item in both MENS and WOMENS collapses to one entry)."""
+        out: dict[str, dict] = {}
+        for d in depts:
+            out.update(fetched.get((name, d), {}))
+        return out
 
     # --check: just preview item matches and exit.
     if args.check:
         if not item_watches:
             log("No item watches in items.txt to check.")
-        for brand, query, dept in item_watches:
-            matches = filter_items(fetched.get((brand, dept), {}), query)
+        for brand, query, depts in item_watches:
+            matches = filter_items(merged_products(brand, depts), query)
             ranked = sorted(matches.values(), key=lambda x: -x["score"])
-            log(f"[{brand} | {query} | {dept}] -> {len(ranked)} match(es):")
+            log(f"[{brand} | {query} | {'+'.join(depts)}] -> {len(ranked)} match(es):")
             for p in ranked[:8]:
                 stock = "in stock" if p["inStock"] else "OUT of stock"
                 print(f"    {p['score']:.2f}  {p['name']}  ({p['price']}, {stock})")
                 print(f"          {p['url']}")
             if not ranked:
-                print("    (no matches — try different/fewer words, or check --check output spelling)")
+                print("    (no matches — try different/fewer words, or check spelling)")
         return
 
     state = load_state()
     new_state = dict(state)
     all_alerts: list[dict] = []
 
-    # Brand watches.
-    for name, dept in brand_watches:
-        cur = fetched.get((name, dept), {})
+    # Brand watches (union of departments, deduped by productCode).
+    for name, depts in brand_watches.items():
+        cur = merged_products(name, depts)
         if not cur:
             continue
-        key = f"brand::{name}::{dept}"
+        key = f"brand::{name}"
         prev = state.get(key)
         if prev is None:
             log(f"  brand:{name}: first run, seeding ({len(cur)} products)")
@@ -415,10 +431,10 @@ def main() -> None:
             log(f"  brand:{name}: {len(a)} alert(s)")
         new_state[key] = cur
 
-    # Item watches.
-    for brand, query, dept in item_watches:
-        cur = filter_items(fetched.get((brand, dept), {}), query)
-        key = f"item::{brand}::{query}::{dept}"
+    # Item watches (union of departments, deduped by productCode).
+    for brand, query, depts in item_watches:
+        cur = filter_items(merged_products(brand, depts), query)
+        key = f"item::{brand}::{query}"
         prev = state.get(key)
         label = f"{brand}: {query}"
         if not cur:
