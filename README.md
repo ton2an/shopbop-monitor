@@ -115,14 +115,21 @@ NTFY_TOPIC=your-shopbop-topic-abc123
 
 ## ⏰ Running on a schedule
 
-Hourly via cron:
+Hourly via cron (invoking the venv's Python directly):
 
 ```cron
-0 * * * * /path/to/shopbop-monitor/run.sh
+30 * * * * cd /path/to/shopbop-monitor && .venv/bin/python3 -u monitor.py >> logs/monitor.log 2>&1
 ```
 
-`run.sh` activates the venv (if present) and appends output to `logs/monitor.log`.
-State lives in `state/state.json`.
+Or use the bundled `run.sh`, which activates the venv (if present) and logs for you:
+
+```cron
+30 * * * * /path/to/shopbop-monitor/run.sh
+```
+
+State lives in `state/state.json`; output in `logs/monitor.log`. If a fetch
+fails (network/HTTP error), that brand is skipped for the run and its state is
+preserved, so a blip never turns into a flood of false "new product" alerts.
 
 ## 🔧 Tuning
 

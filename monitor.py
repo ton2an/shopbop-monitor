@@ -186,10 +186,14 @@ def brand_matches(want: str, designer: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Fetch
 # --------------------------------------------------------------------------- #
-def fetch_brand(name: str, dept: str) -> dict[str, dict]:
-    """Return {productCode: {...}} for products whose designer is exactly `name`."""
+def fetch_brand(name: str, dept: str) -> tuple[dict[str, dict], bool]:
+    """Return ({productCode: {...}}, ok). `ok` is False if any page failed, so
+    callers can skip the brand this run instead of overwriting good state with a
+    partial result (which would make dropped products look brand-new on recovery).
+    Only products whose designer is exactly `name` are kept."""
     products: dict[str, dict] = {}
     offset = 0
+    ok = True
     while offset < MAX_PRODUCTS:
         url = (f"{API}?q={urllib.parse.quote(name)}&siteId={SITE_ID}&dept={dept}"
                f"&lang=en-US&currency=USD&sort=priority"
@@ -197,11 +201,13 @@ def fetch_brand(name: str, dept: str) -> dict[str, dict]:
         try:
             r = SESSION.get(url, headers=HEADERS, timeout=30)
             if r.status_code != 200:
-                log(f"  {name}: HTTP {r.status_code} at offset {offset}")
+                log(f"  {name} [{dept}]: HTTP {r.status_code} at offset {offset}")
+                ok = False
                 break
             data = r.json()
         except Exception as e:
-            log(f"  {name}: fetch error {e!r}")
+            log(f"  {name} [{dept}]: fetch error {e!r}")
+            ok = False
             break
 
         batch = data.get("products", [])
@@ -238,7 +244,7 @@ def fetch_brand(name: str, dept: str) -> dict[str, dict]:
             break
         time.sleep(REQUEST_GAP)
 
-    return products
+    return products, ok
 
 
 def filter_items(products: dict[str, dict], query: str) -> dict[str, dict]:
@@ -377,9 +383,11 @@ def main() -> None:
     log(f"Fetching {len(to_fetch)} brand×dept combo(s) for "
         f"{len(brand_watches)} brand-watch(es) + {len(item_watches)} item-watch(es)...")
     fetched: dict[tuple[str, str], dict] = {}
+    fetch_ok: dict[tuple[str, str], bool] = {}
     for (name, dept) in sorted(to_fetch):
-        prods = fetch_brand(name, dept)
+        prods, ok = fetch_brand(name, dept)
         fetched[(name, dept)] = prods
+        fetch_ok[(name, dept)] = ok
         if not prods:
             log(f"  {name} [{dept}]: 0 products — not carried in this dept (skipped)")
         else:
@@ -393,6 +401,11 @@ def main() -> None:
         for d in depts:
             out.update(fetched.get((name, d), {}))
         return out
+
+    def depts_complete(name: str, depts: tuple[str, ...]) -> bool:
+        """True only if every department fetched cleanly — otherwise we skip the
+        watch this run rather than risk false 'new'/'restock' alerts."""
+        return all(fetch_ok.get((name, d), False) for d in depts)
 
     # --check: just preview item matches and exit.
     if args.check:
@@ -416,6 +429,9 @@ def main() -> None:
 
     # Brand watches (union of departments, deduped by productCode).
     for name, depts in brand_watches.items():
+        if not depts_complete(name, depts):
+            log(f"  brand:{name}: incomplete fetch — skipping (state kept)")
+            continue
         cur = merged_products(name, depts)
         if not cur:
             continue
@@ -433,6 +449,9 @@ def main() -> None:
 
     # Item watches (union of departments, deduped by productCode).
     for brand, query, depts in item_watches:
+        if not depts_complete(brand, depts):
+            log(f"  item:[{brand}: {query}]: incomplete fetch — skipping (state kept)")
+            continue
         cur = filter_items(merged_products(brand, depts), query)
         key = f"item::{brand}::{query}"
         prev = state.get(key)
