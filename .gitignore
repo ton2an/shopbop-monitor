@@ -1,0 +1,14 @@
+# Secrets & personal config — never commit (public repo)
+.env
+brands.txt
+items.txt
+state/
+logs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store

@@ -1,0 +1,10 @@
+# Copy to items.txt and edit. Targeted item watches:
+#   Brand | words you remember | [MENS|WOMENS]
+# Matching is fuzzy — you don't need Shopbop's exact product name. The third
+# field (department) is optional and defaults to WOMENS.
+#
+# Run `python3 monitor.py --check` to preview what each line matches (with a
+# 0-1 score and stock status) before relying on it. An item watch that matches
+# nothing now will still alert the moment a matching product appears.
+AGOLDE | riley straight jeans
+Reformation | tagliatelle midi dress
