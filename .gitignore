@@ -2,8 +2,10 @@
 .env
 brands.txt
 items.txt
+shopify_items.txt
 state/
 logs/
+charts/
 
 # Python
 .venv/

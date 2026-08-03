@@ -1,0 +1,4 @@
+# Copy to shopify_items.txt and edit. One Shopify product-page URL per line —
+# any Shopify store works (the tracker reads the public <url>.json endpoint).
+# Comments after the URL are fine; everything past the first space is ignored.
+https://bernerkuhl.com/products/wool-canvas-ottoman-067-rock   Berner Kühl work shirt, 067 Rock

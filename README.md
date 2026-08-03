@@ -142,6 +142,27 @@ Constants at the top of `monitor.py`:
 | `MAX_ALERTS` | `30` | Cap on pushes per run; extras are summarized into one. |
 | `REQUEST_GAP` | `0.6` | Politeness delay (seconds) between API calls. |
 
+## 📈 Bonus: Shopify price-history tracker
+
+`price_history.py` is a small companion script for products on **any Shopify
+store** (not Shopbop). It polls each product's public `<url>.json` endpoint,
+appends the cheapest in-stock variant's price to `state/price_history.csv`,
+and pushes a ntfy alert (same `NTFY_TOPIC`) whenever the price changes.
+
+```bash
+cp shopify_items.example.txt shopify_items.txt   # one product URL per line
+.venv/bin/python price_history.py --check        # preview current prices
+.venv/bin/python price_history.py                # record a data point + alert on change
+.venv/bin/python price_history.py --graph        # render charts/<handle>.html
+```
+
+Run it daily via cron and the CSV becomes your price-over-time record;
+`--graph` turns it into a self-contained HTML line chart per product:
+
+```cron
+0 9 * * * cd /path/to/shopbop-monitor && .venv/bin/python3 -u price_history.py >> logs/prices.log 2>&1
+```
+
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).
